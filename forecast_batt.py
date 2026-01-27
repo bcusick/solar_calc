@@ -1,3 +1,9 @@
+'''
+Tool to forecast expected energy received for a given Lat/Long location.  Uses OpenMeteo API for forecast solar data and
+PVlib to model PV panel behavior.  
+This data is used to model battery bank performance and determine allowable Wh energy use for the next n days. 
+
+'''
 import openmeteo_requests
 import requests_cache
 import pandas as pd
@@ -27,15 +33,18 @@ longitude = -96.92520
 tilt = 0  # tilt angle of the panel in degrees
 azimuth = 180  # azimuth angle (south-facing)
 panel_watts = 480
-battery = 4300 #wh
+battery = 14300 #wh
 eta = 1 #percent insolation captured
 alpha = 0.9 #accounts for electrical losses to/from battery
-reserve = 500     #wh
-SOC = 0.8
+reserve = 500     #wh min allowable in battery bank
+SOC = 1 #day 1 starting charge
 #reserve_frac = 0.5
 reserve_frac = reserve / battery
 days = 16
-run_to_limit = 0  #set true to run to min during set days, otherwise mean energy will be used
+
+##--- option to clamp budget to mean or run at a limit. If limit above mean, and budget not clamped to mean, then battery will likely run in min
+##--- on last day
+clamp_at_mean = 1 
 daily_limit = 2000
 
 def daily_soc(forecast_wh, battery, SOC, reserve_frac, limit):
@@ -45,7 +54,6 @@ def daily_soc(forecast_wh, battery, SOC, reserve_frac, limit):
     E_max = battery
     min_reserve = 100
     budget = 0
-    print (f"limit = {limit}")
     
     while(min_reserve > reserve_frac*100) and (budget < limit):
         budget += 1
@@ -76,7 +84,7 @@ def daily_soc(forecast_wh, battery, SOC, reserve_frac, limit):
             "spill_wh": spill,
         })
         min_reserve = df["soc_pct"].min()
-
+        
     return df, budget
 
 # Setup the Open-Meteo API client with cache and retry on error
@@ -168,14 +176,17 @@ daily_energy['sun_hours'] = daily_energy["clear_Wh"] / panel_watts
 
 forecast = daily_energy["forecast_Wh"] 
 mean_forecast = daily_energy["forecast_Wh"].mean()
-print (f"mean = {int(mean_forecast)}")
-if run_to_limit:
-    mean_forecast = daily_limit
 
-charge, daily_budget = daily_soc(forecast, battery, SOC, reserve_frac, mean_forecast)
+if clamp_at_mean:
+    daily_limit = mean_forecast
+
+charge, daily_budget = daily_soc(forecast, battery, SOC, reserve_frac, daily_limit)
 charge.index = daily_energy.index
 
-print(charge, daily_budget)
+print (f"limit = {int(daily_limit)}")
+print (f"mean = {int(mean_forecast)}")
+print (f"budget = {daily_budget}")
+print(charge)
 
 fig, ax = plt.subplots(figsize=(10, 6))
 
