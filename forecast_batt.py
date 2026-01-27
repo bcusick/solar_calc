@@ -26,17 +26,19 @@ longitude = -96.92520
 #longitude = -110.32305
 tilt = 0  # tilt angle of the panel in degrees
 azimuth = 180  # azimuth angle (south-facing)
-panel_watts = 600
+panel_watts = 480
 battery = 4300 #wh
+eta = 1 #percent insolation captured
+alpha = 0.9 #accounts for electrical losses to/from battery
 reserve = 500     #wh
 SOC = 0.8
 #reserve_frac = 0.5
 reserve_frac = reserve / battery
 days = 16
 run_to_limit = 0  #set true to run to min during set days, otherwise mean energy will be used
-daily_limit = 20000
+daily_limit = 2000
 
-def daily_soc(forecast_wh, battery, SOC, reserve_frac, limit, eta=1, alpha=0.9):
+def daily_soc(forecast_wh, battery, SOC, reserve_frac, limit):
     F = np.asarray(forecast_wh, dtype=float)
 
     E_min = 0
@@ -52,10 +54,10 @@ def daily_soc(forecast_wh, battery, SOC, reserve_frac, limit, eta=1, alpha=0.9):
         E = []
         spill = []  
         for Fd in F:
-            Id = alpha * eta * Fd  # match budget assumptions
+            #Id = alpha * eta * Fd  # match budget assumptions
 
             # Update absolute battery energy
-            e_next = e + Id - budget
+            e_next = e + Fd - budget
 
             # clamp and track spill
             if e_next > E_max:
@@ -127,8 +129,8 @@ solar_position = pvlib.solarposition.get_solarposition(hourly_dataframe.index, l
 clearsky = location.get_clearsky(hourly_dataframe.index, model="ineichen")  # GHI, DNI, DHI in W/m^2
 clearsky = clearsky.clip(lower=0)
 poa = irradiance.get_total_irradiance(
-    surface_tilt=solar_position["apparent_zenith"].clip(lower=0, upper=90),
-    #surface_tilt = tilt,
+    #surface_tilt=solar_position["apparent_zenith"].clip(lower=0, upper=90),
+    surface_tilt = tilt,
     #surface_azimuth=solar_position["azimuth"],
     surface_azimuth=azimuth,
     solar_zenith=solar_position["apparent_zenith"],
@@ -149,8 +151,8 @@ poa_clear = irradiance.get_total_irradiance(
 )
 
 # Convert POA irradiance (W/m^2) -> estimated panel power (W)
-hourly_dataframe["power_W"] = poa["poa_global"] / 1000.0 * panel_watts
-hourly_dataframe["clear_power_W"] = poa_clear["poa_global"] / 1000.0 * panel_watts
+hourly_dataframe["power_W"] = poa["poa_global"] / 1000.0 * panel_watts * eta * alpha
+hourly_dataframe["clear_power_W"] = poa_clear["poa_global"] / 1000.0 * panel_watts * alpha
 hourly_dataframe["power_W"] = hourly_dataframe["power_W"].clip(lower=0)
 hourly_dataframe["clear_power_W"] = hourly_dataframe["clear_power_W"].clip(lower=0)
 
