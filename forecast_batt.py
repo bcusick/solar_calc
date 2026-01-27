@@ -32,22 +32,22 @@ longitude = -96.92520
 #longitude = -110.32305
 tilt = 0  # tilt angle of the panel in degrees
 azimuth = 180  # azimuth angle (south-facing)
-panel_watts = 480
+panel_watts = 1200
 battery = 14300 #wh
 eta = 1 #percent insolation captured
 alpha = 0.9 #accounts for electrical losses to/from battery
 reserve = 500     #wh min allowable in battery bank
-SOC = 1 #day 1 starting charge
-#reserve_frac = 0.5
-reserve_frac = reserve / battery
+SOC = 0.5 #day 1 starting charge
+#reserve = 50 #%
+reserve = reserve / battery * 100 #%
 days = 16
 
-##--- option to clamp budget to mean or run at a limit. If limit above mean, and budget not clamped to mean, then battery will likely run in min
-##--- on last day
-clamp_at_mean = 1 
+##--- option to clamp budget to mean or run at a limit. If limit above mean, and budget not clamped to mean, 
+##--- then battery will likely run in min on last day
+clamp_at_mean = 0 
 daily_limit = 2000
 
-def daily_soc(forecast_wh, battery, SOC, reserve_frac, limit):
+def daily_soc(forecast_wh, battery, SOC, reserve, limit=1e6):
     F = np.asarray(forecast_wh, dtype=float)
 
     E_min = 0
@@ -55,16 +55,15 @@ def daily_soc(forecast_wh, battery, SOC, reserve_frac, limit):
     min_reserve = 100
     budget = 0
     
-    while(min_reserve > reserve_frac*100) and (budget < limit):
+    while(min_reserve > reserve) and (budget < limit):
+
         budget += 1
-        # ABSOLUTE starting energy (kWh)
         e = SOC * battery
         E = []
         spill = []  
-        for Fd in F:
-            #Id = alpha * eta * Fd  # match budget assumptions
 
-            # Update absolute battery energy
+        for Fd in F:
+
             e_next = e + Fd - budget
 
             # clamp and track spill
@@ -137,8 +136,8 @@ solar_position = pvlib.solarposition.get_solarposition(hourly_dataframe.index, l
 clearsky = location.get_clearsky(hourly_dataframe.index, model="ineichen")  # GHI, DNI, DHI in W/m^2
 clearsky = clearsky.clip(lower=0)
 poa = irradiance.get_total_irradiance(
-    #surface_tilt=solar_position["apparent_zenith"].clip(lower=0, upper=90),
-    surface_tilt = tilt,
+    surface_tilt=solar_position["apparent_zenith"].clip(lower=0, upper=90).min(),
+    #surface_tilt = tilt,
     #surface_azimuth=solar_position["azimuth"],
     surface_azimuth=azimuth,
     solar_zenith=solar_position["apparent_zenith"],
@@ -180,13 +179,21 @@ mean_forecast = daily_energy["forecast_Wh"].mean()
 if clamp_at_mean:
     daily_limit = mean_forecast
 
-charge, daily_budget = daily_soc(forecast, battery, SOC, reserve_frac, daily_limit)
+charge, daily_budget = daily_soc(forecast, battery, SOC, reserve, daily_limit)
 charge.index = daily_energy.index
 
-print (f"limit = {int(daily_limit)}")
+charge_mean, daily_budget_mean = daily_soc(forecast, battery, SOC, reserve, mean_forecast)
+charge_mean.index = daily_energy.index
+
+charge_nl, daily_budget_nl = daily_soc(forecast, battery, SOC, reserve)
+charge_nl.index = daily_energy.index
+
+print (f"budget limited = {daily_budget}")
+#print (f"limit = {int(daily_limit)}")
 print (f"mean = {int(mean_forecast)}")
-print (f"budget = {daily_budget}")
-print(charge)
+print (f"budget no limit = {daily_budget_nl}")
+#print(charge)
+#print(charge_nl)
 
 fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -202,16 +209,9 @@ ax.plot(
     daily_energy.index,
     daily_energy["clear_Wh"],
     linewidth=2,
-    label="Clear-sky",
-)
-
-# Daily energy budget
-ax.axhline(
-    daily_budget,
     linestyle="--",
-    linewidth=2,
-    color="grey",
-    label=f"Daily budget ({daily_budget:.0f} Wh)",
+    label="Clear-sky",
+    color="cyan"
 )
 
 ax.set_ylabel("Energy (Wh / day)")
@@ -225,6 +225,24 @@ ax2.plot(
     charge["soc_pct"],
     linestyle="-",
     linewidth=2,
+    color="green",
+    label=f"Limit ({daily_budget:.0f} Wh)",
+)
+
+ax2.plot(
+    charge_mean["soc_pct"],
+    linestyle="-",
+    linewidth=2,
+    color="orange",
+    label=f"Mean ({daily_budget_mean:.0f} Wh)",
+)
+
+ax2.plot(
+    charge_nl["soc_pct"],
+    linestyle="-",
+    linewidth=2,
+    color="red",
+    label=f"Max ({daily_budget_nl:.0f} Wh)",
 )
 
 ax2.set_ylabel("State of Charge (%)")
