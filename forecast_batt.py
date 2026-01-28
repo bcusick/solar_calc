@@ -30,22 +30,19 @@ longitude = -96.92520
 #la paz
 #latitude = 24.13277 
 #longitude = -110.32305
-tilt = 0  # tilt angle of the panel in degrees
+tilt = 38  # tilt angle of the panel in degrees
 azimuth = 180  # azimuth angle (south-facing)
-panel_watts = 1200
-battery = 14300 #wh
+panel_watts = 650*6
+battery = 305*3.2*16*.8 * 4#wh
 eta = 1 #percent insolation captured
 alpha = 0.9 #accounts for electrical losses to/from battery
 reserve = 500     #wh min allowable in battery bank
-SOC = 0.5 #day 1 starting charge
-#reserve = 50 #%
+SOC = 1 #day 1 starting charge
 reserve = reserve / battery * 100 #%
+#reserve = 50 #%
 days = 16
-
-##--- option to clamp budget to mean or run at a limit. If limit above mean, and budget not clamped to mean, 
-##--- then battery will likely run in min on last day
-clamp_at_mean = 0 
-daily_limit = 2000
+ 
+daily_limit = 1500 #tbd use to plot actual average daily use 
 
 def daily_soc(forecast_wh, battery, SOC, reserve, limit=1e6):
     F = np.asarray(forecast_wh, dtype=float)
@@ -56,8 +53,11 @@ def daily_soc(forecast_wh, battery, SOC, reserve, limit=1e6):
     budget = 0
     
     while(min_reserve > reserve) and (budget < limit):
+        if reserve == 0: #special case to show dead battery
+            budget = limit
+        else:
+            budget += 1
 
-        budget += 1
         e = SOC * battery
         E = []
         spill = []  
@@ -136,9 +136,7 @@ solar_position = pvlib.solarposition.get_solarposition(hourly_dataframe.index, l
 clearsky = location.get_clearsky(hourly_dataframe.index, model="ineichen")  # GHI, DNI, DHI in W/m^2
 clearsky = clearsky.clip(lower=0)
 poa = irradiance.get_total_irradiance(
-    surface_tilt=solar_position["apparent_zenith"].clip(lower=0, upper=90).min(),
-    #surface_tilt = tilt,
-    #surface_azimuth=solar_position["azimuth"],
+    surface_tilt = tilt,
     surface_azimuth=azimuth,
     solar_zenith=solar_position["apparent_zenith"],
     solar_azimuth=solar_position["azimuth"],
@@ -174,26 +172,29 @@ daily_energy['percent'] = (daily_energy['forecast_Wh'] / daily_energy['clear_Wh'
 daily_energy['sun_hours'] = daily_energy["clear_Wh"] / panel_watts
 
 forecast = daily_energy["forecast_Wh"] 
-mean_forecast = daily_energy["forecast_Wh"].mean()
+mean = forecast.mean()
 
-if clamp_at_mean:
-    daily_limit = mean_forecast
+charge_max, daily_budget_max = daily_soc(forecast, battery, SOC, reserve)
+charge_max.index = daily_energy.index
 
-charge, daily_budget = daily_soc(forecast, battery, SOC, reserve, daily_limit)
-charge.index = daily_energy.index
+limit_mid = daily_budget_max * 0.75
+limit_low = daily_budget_max * 0.50
 
-charge_mean, daily_budget_mean = daily_soc(forecast, battery, SOC, reserve, mean_forecast)
+charge_low, daily_budget_low = daily_soc(forecast, battery, SOC, reserve, limit_low)
+charge_low.index = daily_energy.index
+
+charge_mid, daily_budget_mid = daily_soc(forecast, battery, SOC, reserve, limit_mid)
+charge_mid.index = daily_energy.index
+
+charge_mean, daily_budget_mean = daily_soc(forecast, battery, SOC, 0, mean)
 charge_mean.index = daily_energy.index
 
-charge_nl, daily_budget_nl = daily_soc(forecast, battery, SOC, reserve)
-charge_nl.index = daily_energy.index
-
-print (f"budget limited = {daily_budget}")
-#print (f"limit = {int(daily_limit)}")
-print (f"mean = {int(mean_forecast)}")
-print (f"budget no limit = {daily_budget_nl}")
-#print(charge)
-#print(charge_nl)
+print (f"Mean = {int(mean)}")
+print (f"Low = {daily_budget_low}")
+print (f"Mid = {daily_budget_mid}")
+print (f"Max = {daily_budget_max}")
+print("Mid Data:")
+print(charge_mid)
 
 fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -208,8 +209,8 @@ ax.bar(
 ax.plot(
     daily_energy.index,
     daily_energy["clear_Wh"],
-    linewidth=2,
-    linestyle="--",
+    linewidth=1,
+    linestyle="-",
     label="Clear-sky",
     color="cyan"
 )
@@ -222,31 +223,39 @@ ax.grid(axis="y", alpha=0.3)
 ax2 = ax.twinx()
 
 ax2.plot(
-    charge["soc_pct"],
+    charge_low["soc_pct"],
     linestyle="-",
-    linewidth=2,
-    color="green",
-    label=f"Limit ({daily_budget:.0f} Wh)",
+    linewidth=1,
+    color="grey",
+    label=f"Low ({daily_budget_low:.0f} Wh)",
+)
+
+ax2.plot(
+    charge_mid["soc_pct"],
+    linestyle="--",
+    linewidth=1,
+    color="grey",
+    label=f"Mid ({daily_budget_mid:.0f} Wh)",
+)
+
+ax2.plot(
+    charge_max["soc_pct"],
+    linestyle="-",
+    linewidth=1,
+    color="grey",
+    label=f"Max ({daily_budget_max:.0f} Wh)",
 )
 
 ax2.plot(
     charge_mean["soc_pct"],
     linestyle="-",
-    linewidth=2,
-    color="orange",
+    linewidth=1,
+    color="black",
     label=f"Mean ({daily_budget_mean:.0f} Wh)",
 )
 
-ax2.plot(
-    charge_nl["soc_pct"],
-    linestyle="-",
-    linewidth=2,
-    color="red",
-    label=f"Max ({daily_budget_nl:.0f} Wh)",
-)
-
 ax2.set_ylabel("State of Charge (%)")
-ax2.set_ylim(0, 100)
+ax2.set_ylim(0, 105)
 
 # ---- Combined legend ----
 lines1, labels1 = ax.get_legend_handles_labels()
