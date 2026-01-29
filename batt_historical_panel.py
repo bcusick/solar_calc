@@ -1,8 +1,7 @@
 '''
 Tool to forecast expected energy received for a given Lat/Long location.  Uses OpenMeteo API for forecast solar data and
-PVlib to model PV panel behavior.  
-This data is used to model battery bank performance and determine allowable Wh energy use for the next n days. 
-
+PVlib to model PV panel behavior.
+This data is used to model battery bank performance and determine allowable Wh energy use for the next n days.
 '''
 import openmeteo_requests
 import requests_cache
@@ -15,51 +14,55 @@ from pvlib.location import Location
 import numpy as np
 
 ###
-#INPUTS
+# INPUTS
 ###
-
 # mills river
 #latitude = 35.37786
 #longitude = -82.58089
-#Richmond
-#latitude = 37.51159749662755
-#longitude = -77.47304198592848
-#Xalapa
+# Xalapa
 latitude = 19.54234
 longitude = -96.92520
-#la paz
-#latitude = 24.13277 
-#longitude = -110.32305
 
-panel_watts = 650*4
-battery = 305*3.2*16*.8 * 1 #wh
-eta = 1 #percent insolation captured
-alpha = 0.9 #accounts for electrical losses to/from battery
-reserve = 2000     #wh min allowable in battery bank
-SOC = 1 #day 1 starting charge
-reserve = reserve / battery * 100 #%
+max_panels = 50
+panel_watts = 650  # W
+panel_cost = 400
+
+max_batteries = 4
+battery_wh_per_battery = 305 * 3.2 * 16 * 0.8  # Wh
+battery_cost = 1000
+
+eta = 1      # percent insolation captured
+alpha = 0.9  # accounts for electrical losses to/from battery
+
+reserve_wh = 2000  # Wh min allowable in the whole battery bank
+SOC = 1            # day 1 starting charge
 
 
-def daily_soc(forecast_wh, battery, SOC, reserve, limit=1e6):
+def daily_soc(forecast_wh, battery_wh, SOC, reserve_pct, limit=1e6):
+    """
+    forecast_wh: 1D array-like (Wh/day)
+    battery_wh: total bank capacity (Wh)
+    reserve_pct: minimum SOC (%) allowed
+    """
     F = np.asarray(forecast_wh, dtype=float)
 
     E_min = 0
-    E_max = battery
+    E_max = battery_wh
     min_reserve = 100
-    budget = panel_watts * 2
-    
-    while(min_reserve > reserve) and (budget < limit):
-        if reserve == 0: #special case to show dead battery
+    budget = panel_watts * 2  # starting guess
+
+    while (min_reserve > reserve_pct) and (budget < limit):
+        if reserve_pct == 0:  # special case to show dead battery
             budget = limit
         else:
             budget += 100
             print(budget)
-        e = SOC * battery
+
+        e = SOC * battery_wh
         E = []
-        spill = []  
+        spill = []
 
         for Fd in F:
-
             e_next = e + Fd - budget
 
             # clamp and track spill
@@ -75,20 +78,20 @@ def daily_soc(forecast_wh, battery, SOC, reserve, limit=1e6):
 
         df = pd.DataFrame({
             "battery_wh": E,
-            "soc_pct": [100*e/battery for e in E],
+            "soc_pct": [100 * e / battery_wh for e in E],
             "spill_wh": spill,
         })
+
         min_reserve = df["soc_pct"].min()
-        
+
     return df, budget
 
-# Setup the Open-Meteo API client with cache and retry on error
-cache_session = requests_cache.CachedSession('.cache', expire_after = 3600)
-retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
-openmeteo = openmeteo_requests.Client(session = retry_session)
 
-# Make sure all required weather variables are listed here
-# The order of variables in hourly or daily is important to assign them correctly below
+# Setup the Open-Meteo API client with cache and retry on error
+cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
+retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+openmeteo = openmeteo_requests.Client(session=retry_session)
+
 url = "https://historical-forecast-api.open-meteo.com/v1/forecast"
 params = {
     "latitude": latitude,
@@ -103,7 +106,7 @@ response = responses[0]
 
 # Process hourly data
 hourly = response.Hourly()
-timezone = response.Timezone().decode('utf-8') 
+timezone = response.Timezone().decode('utf-8')
 
 dni = hourly.Variables(0).ValuesAsNumpy()
 dhi = hourly.Variables(1).ValuesAsNumpy()
@@ -161,28 +164,52 @@ dt_hours = hourly.Interval() / 3600.0
 hourly_df["energy_Wh"] = hourly_df["power_W"] * dt_hours
 daily_df = hourly_df["energy_Wh"].resample("D").sum().to_frame(name="historical_Wh")
 
-charge_max, daily_budget_max = daily_soc(daily_df, battery, SOC, reserve)
-charge_max.index = daily_df.index
+panels = np.arange(1, max_panels + 1, 1)
 
+# ---- NEW: outer loop over battery count ----
+results = {}  # batt_count -> list of budgets across panels
+total_cost = {}
+
+for batt_count in range(1, max_batteries + 1):
+    battery_total_wh = batt_count * battery_wh_per_battery
+    reserve_pct = (reserve_wh / battery_total_wh) * 100.0
+
+    use_limits = []
+    costs = []
+    for panel in panels:
+        array_out = (daily_df["historical_Wh"] * panel).to_numpy()  # 1D Wh/day
+        charge_max, daily_budget_max = daily_soc(array_out, battery_total_wh, SOC, reserve_pct)
+        cost = panel * panel_cost + batt_count * battery_cost
+        use_limits.append(daily_budget_max)
+        costs.append(cost)
+
+    results[batt_count] = use_limits
+    total_cost[batt_count] = costs
+
+energies = pd.DataFrame(results)
+monies = pd.DataFrame(total_cost)
+
+print(energies)
+print(monies)
+
+
+
+# ---- Plot ----
 fig, ax = plt.subplots(figsize=(10, 6))
 
-ax.plot(
-    charge_max["soc_pct"],
-    linestyle="-",
-    linewidth=1,
-    color="grey",
-    label=f"Max ({daily_budget_max:.0f} Wh)",
-)
+for batt_count, use_limits in results.items():
+    ax.plot(
+        panels,
+        use_limits,
+        linestyle="-",
+        linewidth=2,
+        label=f"{batt_count} batt ({batt_count * battery_wh_per_battery:.0f} Wh)",
+    )
 
-ax.set_ylabel("State of Charge (%)")
-ax.set_ylim(0, 105)
+ax.set_xlabel("Number of panels")
+ax.set_ylabel("Max daily budget (Wh/day) while staying above reserve")
+ax.grid(True, alpha=0.3)
+ax.legend()
 
-# ---- Combined legend ----
-lines1, labels1 = ax.get_legend_handles_labels()
-#lines2, labels2 = ax2.get_legend_handles_labels()
-ax.legend(lines1 , labels1 , loc="upper left")
-
-plt.xticks(rotation=45)
 plt.tight_layout()
 plt.show()
-
