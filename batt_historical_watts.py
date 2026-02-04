@@ -20,21 +20,24 @@ import numpy as np
 #latitude = 35.37786
 #longitude = -82.58089
 # Xalapa
-latitude = 19.54234
-longitude = -96.92520
+#latitude = 19.54234
+#longitude = -96.92520
+#la paz
+latitude = 24.13277 
+longitude = -110.32305
 
-max_panels = 20
-panel_watts = 650  # W
-panel_cost = 400
+max_watts = 1200
+min_watts = 100  # W
+#panel_cost = 400
 
-max_batteries = 4
-battery_wh_per_battery = 305 * 3.2 * 16 * 0.8  # Wh
-battery_cost = 1000
+max_batteries = 6
+battery_wh_per_battery = 2000  # Wh
+#battery_cost = 1000
 
 eta = 1      # percent insolation captured
 alpha = 0.9  # accounts for electrical losses to/from battery
 
-reserve_wh = 2000  # Wh min allowable in the whole battery bank
+reserve_wh = 500  # Wh min allowable in the whole battery bank
 SOC = 1            # day 1 starting charge
 
 
@@ -49,14 +52,14 @@ def daily_soc(forecast_wh, battery_wh, SOC, reserve_pct, limit=1e6):
     E_min = 0
     E_max = battery_wh
     min_reserve = 100
-    budget = panel_watts * 2  # starting guess
+    budget = 200  # starting guess
 
     while (min_reserve > reserve_pct) and (budget < limit):
         if reserve_pct == 0:  # special case to show dead battery
             budget = limit
         else:
-            budget += 100
-            print(budget)
+            budget += 10
+            #print(budget)
 
         e = SOC * battery_wh
         E = []
@@ -97,7 +100,7 @@ params = {
     "latitude": latitude,
     "longitude": longitude,
     "start_date": "2022-01-01",
-    "end_date": "2024-12-31",
+    "end_date": "2025-12-31",
     "hourly": ["direct_normal_irradiance", "shortwave_radiation", "diffuse_radiation"],
     "timezone": "auto",
 }
@@ -146,7 +149,7 @@ tilt_hourly = daily_tilt.reindex(hourly_df.index.floor("D")).to_numpy()
 surface_azimuth = 180  # south
 
 poa = irradiance.get_total_irradiance(
-    surface_tilt=tilt_hourly,
+    surface_tilt=0,
     surface_azimuth=surface_azimuth,
     solar_zenith=solpos["apparent_zenith"].to_numpy(),
     solar_azimuth=solpos["azimuth"].to_numpy(),
@@ -156,7 +159,7 @@ poa = irradiance.get_total_irradiance(
 )
 
 # Convert POA irradiance (W/m^2) -> estimated panel power (W)
-hourly_df["power_W"] = poa["poa_global"] / 1000.0 * panel_watts * eta * alpha
+hourly_df["power_W"] = poa["poa_global"] / 1000.0 * eta * alpha
 hourly_df["power_W"] = hourly_df["power_W"].clip(lower=0)
 
 # Convert power -> energy per sample (Wh)
@@ -164,33 +167,34 @@ dt_hours = hourly.Interval() / 3600.0
 hourly_df["energy_Wh"] = hourly_df["power_W"] * dt_hours
 daily_df = hourly_df["energy_Wh"].resample("D").sum().to_frame(name="historical_Wh")
 
-panels = np.arange(1, max_panels + 1, 1)
+sizes = np.arange(min_watts, max_watts + min_watts, min_watts)
 
 # ---- NEW: outer loop over battery count ----
 results = {}  # batt_count -> list of budgets across panels
-total_cost = {}
+#total_cost = {}
 
 for batt_count in range(1, max_batteries + 1):
     battery_total_wh = batt_count * battery_wh_per_battery
     reserve_pct = (reserve_wh / battery_total_wh) * 100.0
 
     use_limits = []
-    costs = []
-    for panel in panels:
-        array_out = (daily_df["historical_Wh"] * panel).to_numpy()  # 1D Wh/day
+    #costs = []
+    for size in sizes:
+        print(size)
+        array_out = (daily_df["historical_Wh"] * size).to_numpy()  # 1D Wh/day
         charge_max, daily_budget_max = daily_soc(array_out, battery_total_wh, SOC, reserve_pct)
-        cost = panel * panel_cost + batt_count * battery_cost
+        #cost = panel * panel_cost + batt_count * battery_cost
         use_limits.append(daily_budget_max)
-        costs.append(cost)
+        #costs.append(cost)
 
     results[batt_count] = use_limits
-    total_cost[batt_count] = costs
+    #total_cost[batt_count] = costs
 
 energies = pd.DataFrame(results)
-monies = pd.DataFrame(total_cost)
+#monies = pd.DataFrame(total_cost)
 
 print(energies)
-print(monies)
+#print(monies)
 
 
 
@@ -199,15 +203,15 @@ fig, ax = plt.subplots(figsize=(10, 6))
 
 for batt_count, use_limits in results.items():
     ax.plot(
-        panels,
+        sizes,
         use_limits,
         linestyle="-",
         linewidth=2,
         label=f"{batt_count} batt ({batt_count * battery_wh_per_battery:.0f} Wh)",
     )
 
-ax.set_xlabel("Number of panels")
-ax.set_ylabel("Max daily budget (Wh/day) while staying above reserve")
+ax.set_xlabel("watts")
+ax.set_ylabel("Max daily budget (Wh/day)")
 ax.grid(True, alpha=0.3)
 ax.legend()
 

@@ -30,10 +30,10 @@ longitude = -96.92520
 #la paz
 #latitude = 24.13277 
 #longitude = -110.32305
-tilt = 38  # tilt angle of the panel in degrees
+tilt = 0  # tilt angle of the panel in degrees
 azimuth = 180  # azimuth angle (south-facing)
-panel_watts = 650 *10
-battery = 305*3.2*16*.8 * 2 #wh
+panel_watts = 480
+battery = 305*3.2*16*.8 * 1 #wh
 eta = 1 #percent insolation captured
 alpha = 0.9 #accounts for electrical losses to/from battery
 reserve = 2000     #wh min allowable in battery bank

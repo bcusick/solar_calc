@@ -31,8 +31,8 @@ longitude = -96.92520
 #latitude = 24.13277 
 #longitude = -110.32305
 
-panel_watts = 650*4
-battery = 305*3.2*16*.8 * 1 #wh
+panel_watts = 650*10
+battery = 305*3.2*16*.8 * 2 #wh
 eta = 1 #percent insolation captured
 alpha = 0.9 #accounts for electrical losses to/from battery
 reserve = 2000     #wh min allowable in battery bank
@@ -46,13 +46,13 @@ def daily_soc(forecast_wh, battery, SOC, reserve, limit=1e6):
     E_min = 0
     E_max = battery
     min_reserve = 100
-    budget = panel_watts * 2
+    budget = 14000
     
     while(min_reserve > reserve) and (budget < limit):
         if reserve == 0: #special case to show dead battery
             budget = limit
         else:
-            budget += 100
+            budget += 1
             print(budget)
         e = SOC * battery
         E = []
@@ -143,7 +143,7 @@ tilt_hourly = daily_tilt.reindex(hourly_df.index.floor("D")).to_numpy()
 surface_azimuth = 180  # south
 
 poa = irradiance.get_total_irradiance(
-    surface_tilt=tilt_hourly,
+    surface_tilt=38,
     surface_azimuth=surface_azimuth,
     solar_zenith=solpos["apparent_zenith"].to_numpy(),
     solar_azimuth=solpos["azimuth"].to_numpy(),
