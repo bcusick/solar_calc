@@ -31,11 +31,11 @@ longitude = -96.92520
 #latitude = 24.13277 
 #longitude = -110.32305
 
-panel_watts = 650*10
+panel_watts = 600
 battery = 305*3.2*16*.8 * 2 #wh
 eta = 1 #percent insolation captured
 alpha = 0.9 #accounts for electrical losses to/from battery
-reserve = 2000     #wh min allowable in battery bank
+reserve = 500     #wh min allowable in battery bank
 SOC = 1 #day 1 starting charge
 reserve = reserve / battery * 100 #%
 
@@ -46,13 +46,13 @@ def daily_soc(forecast_wh, battery, SOC, reserve, limit=1e6):
     E_min = 0
     E_max = battery
     min_reserve = 100
-    budget = 14000
+    budget = 100
     
     while(min_reserve > reserve) and (budget < limit):
         if reserve == 0: #special case to show dead battery
             budget = limit
         else:
-            budget += 1
+            budget += 100
             print(budget)
         e = SOC * battery
         E = []

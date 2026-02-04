@@ -151,7 +151,7 @@ def find_max_budget_binary(
 
     while (high - low) > 1:
         mid = (low + high) // 2
-        print(f"high: {high}, mid: {mid}, low: {low}")
+        #print(f"high: {high}, mid: {mid}, low: {low}")
         if feasible(mid):
             low = mid
         else:
@@ -167,7 +167,6 @@ def find_max_budget_binary(
 def fetch_openmeteo_hourly(
     latitude: float,
     longitude: float,
-    days: int,
     *,
     cache_dir: Optional[str] = ".cache",
     cache_expire_s: int = 3600,
@@ -198,8 +197,8 @@ def fetch_openmeteo_hourly(
     params = {
         "latitude": latitude,
         "longitude": longitude,
-        "start_date": "2022-01-01",
-        "end_date": "2025-12-31",
+        "start_date": "2022-05-01",
+        "end_date": "2022-08-31",
         "hourly": ["direct_normal_irradiance", "shortwave_radiation", "diffuse_radiation"],
         "timezone": "auto",
         }
@@ -276,8 +275,6 @@ def compute_daily_energy(
     # map that daily value onto each hour
     tilt_hourly = daily_tilt.reindex(hourly_df.index.floor("D")).to_numpy()
 
-    
-
     # POA from forecast irradiance
     poa = irradiance.get_total_irradiance(
         surface_tilt=float(tilt_deg),
@@ -289,16 +286,11 @@ def compute_daily_energy(
         dhi=dhi,
     )
 
-    
-
     # Convert POA irradiance -> estimated panel power
     # Your original: forecast uses eta * alpha; clear uses alpha only
     power_w = (poa["poa_global"].to_numpy(dtype=float) / 1000.0) * float(panel_watts) * float(eta) * float(alpha)
-    
-
     power_w = np.clip(power_w, 0.0, None)
    
-
     # Energy per sample
     # hourly_df index spacing is constant per Open-Meteo interval, so derive dt from index
     # If you used hourly interval, dt=1 hour; still safe:
@@ -311,12 +303,8 @@ def compute_daily_energy(
     hourly_df = hourly_df.copy()
     hourly_df["energy_Wh"] = power_w * dt_hours
    
-
     daily = hourly_df["energy_Wh"].resample("D").sum().to_frame(name="forecast_Wh")
    
-
-    
-
     return daily
 
 
@@ -351,23 +339,23 @@ def run(params: Dict[str, Any]) -> Dict[str, Any]:
     """
     lat = float(params["latitude"])
     lon = float(params["longitude"])
-    tilt = float(params.get("tilt", 30.0))
+    tilt = float(params.get("tilt", 0.0))
     azimuth = float(params.get("azimuth", 180.0))
     panel_watts = float(params.get("panel_watts", 1000.0))
     battery_wh = float(params["battery_wh"])
     eta = float(params.get("eta", 1.0))
     alpha = float(params.get("alpha", 0.9))
     reserve_wh = float(params.get("reserve_wh", 0.0))
-    soc0 = float(params.get("soc0", 0.8))
-    days = int(params.get("days", 16))
+    soc0 = float(params.get("soc0", 1.0))
+    max_panels = int(params["max_panels"])
+    max_batteries = int(params["max_batteries"])
+    
 
     cache_dir = params.get("cache_dir", ".cache")
-    low_frac = float(params.get("low_frac", 0.50))
-    mid_frac = float(params.get("mid_frac", 0.75))
-
+    
     # 1) Fetch Open-Meteo hourly
     hourly_df, timezone, _dt_hours = fetch_openmeteo_hourly(
-        lat, lon, days, cache_dir=cache_dir
+        lat, lon, cache_dir=cache_dir
     )
 
     # 2) Compute daily energy using pvlib POA + clearsky
@@ -385,21 +373,23 @@ def run(params: Dict[str, Any]) -> Dict[str, Any]:
     mean_forecast = float(np.mean(forecast)) if forecast.size else 0.0
 
     results = {}  # batt_count -> list of budgets across panels
+    calc=0
 
-    for batt_count in range(1, 6 + 1):
+    for batt_count in range(1, max_batteries + 1):
         battery_total_wh = batt_count * battery_wh
         
 
         use_limits = []
         
-        for panel in range(1, 600 + 1):
-            
+        for panel in range(1, max_panels + 1):
+            calc+=1
+            print(f"{int(calc/(max_batteries*max_panels)*100)}%")
             budget_max = find_max_budget_binary(
                 forecast * panel,
                 battery_wh=battery_total_wh,
                 soc0=soc0,
                 reserve_wh=reserve_wh,
-                high_start=mean_forecast * panel,
+                high_start= panel * panel_watts *3,
                 hard_cap=200_000,
             )
             
@@ -410,6 +400,7 @@ def run(params: Dict[str, Any]) -> Dict[str, Any]:
         
 
     energies = pd.DataFrame(results)
+    energies.index = energies.index + 1
 
     return energies
 
@@ -427,7 +418,8 @@ if __name__ == "__main__":
         "alpha": 0.9,
         "reserve_wh": 500.0,
         "soc0": 1,
-        "days": 16,
+        "max_panels": 1200,
+        "max_batteries": 6,
         # "cache_dir": None,  # use in-memory cache if desired
     }
 

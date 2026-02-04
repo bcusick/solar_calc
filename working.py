@@ -161,8 +161,8 @@ def find_max_budget_binary(
         return int(high)
 
     while (high - low) > 1:
-        print(high-low)
         mid = (low + high) // 2
+        print(f"high: {high}, mid: {mid}, low: {low}")
         if feasible(mid):
             low = mid
         else:
@@ -480,7 +480,14 @@ def run(params: Dict[str, Any]) -> Dict[str, Any]:
         },
     }
 
-    return out
+    curves = pd.DataFrame()
+    curves["low"]= soc_low.round(3).tolist()
+    curves["mid"]= soc_mid.round(3).tolist()
+    curves["max"]= soc_max.round(3).tolist()
+    curves["mean"]= soc_mean.round(3).tolist()
+    curves.index = daily_energy.index
+
+    return out, curves
 
 
 # ----------------------------
@@ -492,19 +499,21 @@ if __name__ == "__main__":
     params = {
         "latitude": 19.54234,
         "longitude": -96.92520,
-        "tilt": 38,
+        "tilt": 0,
         "azimuth": 180,
-        "panel_watts": 650 * 10,
-        "battery_wh": 305 * 3.2 * 16 * 0.8 * 2,  # your expression
+        "panel_watts": 600,
+        "battery_wh": 305 * 3.2 * 16 * 0.8 * 1,  # your expression
         "eta": 1.0,
         "alpha": 0.9,
-        "reserve_wh": 2000.0,
-        "soc0": 0.8,
+        "reserve_wh": 500.0,
+        "soc0": 1,
         "days": 16,
+        "mid_frac": 0.9,
         # "cache_dir": None,  # use in-memory cache if desired
     }
 
-    result = run(params)
+    result, curves  = run(params)
+    #print("First 5 days forecast Wh:", result["daily"]["forecast_Wh"][:5])
+    #print("First 5 days SOC% (max):", result["curves"]["soc_pct"]["max"][:5])
+    print(curves)
     print("Budgets (Wh/day):", result["budgets_wh_per_day"])
-    print("First 5 days forecast Wh:", result["daily"]["forecast_Wh"][:5])
-    print("First 5 days SOC% (max):", result["curves"]["soc_pct"]["max"][:5])

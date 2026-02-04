@@ -162,8 +162,8 @@ def find_max_budget_binary(
         return int(high)
 
     while (high - low) > 1:
-        print(f"high: {high}, low: {low}")
         mid = (low + high) // 2
+        print(f"high: {high}, mid: {mid}, low: {low}")
         if feasible(mid):
             low = mid
         else:
@@ -412,7 +412,7 @@ def run(params: Dict[str, Any]) -> Dict[str, Any]:
         battery_wh=battery_wh,
         soc0=soc0,
         reserve_wh=reserve_wh,
-        high_start=mean_forecast,
+        high_start=panel_watts*3,
         hard_cap=200_000,
     )
 
@@ -492,14 +492,14 @@ if __name__ == "__main__":
     params = {
         "latitude": 19.54234,
         "longitude": -96.92520,
-        "tilt": 38,
+        "tilt": 0,
         "azimuth": 180,
-        "panel_watts": 650 * 10,
-        "battery_wh": 305 * 3.2 * 16 * 0.8 * 3,  # your expression
+        "panel_watts": 600,
+        "battery_wh": 12500 * 1,  # your expression
         "eta": 1.0,
         "alpha": 0.9,
-        "reserve_wh": 2000.0,
-        "soc0": 1.0,
+        "reserve_wh": 500.0,
+        "soc0": 1,
         "days": 16,
         # "cache_dir": None,  # use in-memory cache if desired
     }
